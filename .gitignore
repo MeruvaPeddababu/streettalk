@@ -7,3 +7,5 @@ instagram_state.json
 .DS_Store
 .vercel
 .playwright-mcp
+node_modules
+package-lock.json

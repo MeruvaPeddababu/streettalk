@@ -1,0 +1,43 @@
+name: Refresh trending reels
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "0 */6 * * *"
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install python deps + chromium
+        run: |
+          pip install -r requirements-scraper.txt
+          playwright install --with-deps chromium
+
+      - name: Write .env for scraper
+        run: |
+          cat > .env <<EOF
+          IG_USER=${{ secrets.IG_USER }}
+          IG_PASS=${{ secrets.IG_PASS }}
+          EOF
+
+      - name: Run scraper
+        run: python refresh_trending.py
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Upload results to Vercel Blob
+        env:
+          BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
+        run: |
+          npm install @vercel/blob
+          node scripts/upload_blob.mjs

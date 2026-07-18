@@ -28,17 +28,27 @@ def parse_likes(v):
 all_reels = []
 profiles_cache = {}
 
+BLOB_BASE_URL = os.environ.get("BLOB_BASE_URL", "").rstrip("/")
+
+def _read_json(filename):
+    if BLOB_BASE_URL:
+        try:
+            resp = requests.get(f"{BLOB_BASE_URL}/{filename}", params={"t": str(time.time())}, timeout=15)
+            resp.raise_for_status()
+            return resp.json()
+        except Exception:
+            pass
+    with open(filename) as f:
+        return json.load(f)
+
 def load_data():
     global all_reels, profiles_cache
-    with open("reels_playwright_output.json") as f:
-        reels_raw = json.load(f)
+    reels_raw = _read_json("reels_playwright_output.json")
     reels_data = reels_raw["results"]
 
-    with open("profile_info.json") as f:
-        profiles_data = json.load(f)
+    profiles_data = _read_json("profile_info.json")
 
-    with open("trending_reels_30.json") as f:
-        trending_raw = json.load(f)
+    trending_raw = _read_json("trending_reels_30.json")
 
     for t in trending_raw:
         t["_likes"] = parse_likes(t.get("likes"))
@@ -190,9 +200,25 @@ def api_trends_timeline():
     result = {u: {k: v for k, v in sorted(creator_monthly[u].items())} for u in top}
     return jsonify(result)
 
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
+GITHUB_REPO = os.environ.get("GITHUB_REPO", "")
+GITHUB_WORKFLOW_FILE = os.environ.get("GITHUB_WORKFLOW_FILE", "refresh.yml")
+
 _scrape_in_progress = False
 _scrape_lock = threading.Lock()
 _last_refresh = {"status": "idle", "new_reels": 0, "total_reels": 0, "error": None, "started_at": None}
+
+def _dispatch_github_workflow():
+    resp = requests.post(
+        f"https://api.github.com/repos/{GITHUB_REPO}/actions/workflows/{GITHUB_WORKFLOW_FILE}/dispatches",
+        headers={
+            "Authorization": f"Bearer {GITHUB_TOKEN}",
+            "Accept": "application/vnd.github+json",
+        },
+        json={"ref": "main"},
+        timeout=15,
+    )
+    resp.raise_for_status()
 
 def _run_scrape():
     global _scrape_in_progress, _last_refresh
@@ -279,6 +305,15 @@ def api_reels_add():
 @app.route("/api/refresh")
 def api_refresh():
     global _scrape_in_progress
+    if GITHUB_TOKEN and GITHUB_REPO:
+        try:
+            _dispatch_github_workflow()
+            _last_refresh["status"] = "running"
+            _last_refresh["started_at"] = time.time()
+            _last_refresh["error"] = None
+            return jsonify({"ok": True, "status": "started", "via": "github_actions"})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)[:500]}), 502
     with _scrape_lock:
         if _scrape_in_progress:
             return jsonify({"ok": True, "status": "already running"})
@@ -289,6 +324,25 @@ def api_refresh():
 
 @app.route("/api/refresh/status")
 def api_refresh_status():
+    if BLOB_BASE_URL:
+        try:
+            resp = requests.get(f"{BLOB_BASE_URL}/status.json", params={"t": str(time.time())}, timeout=15)
+            resp.raise_for_status()
+            status = resp.json()
+            started_at = _last_refresh.get("started_at")
+            if started_at:
+                from datetime import datetime, timezone
+                updated_at = datetime.fromisoformat(status["updated_at"].replace("Z", "+00:00"))
+                if updated_at.timestamp() < started_at:
+                    return jsonify({"status": "running"})
+            old_len = len(all_reels)
+            load_data()
+            status["total_reels"] = len(all_reels)
+            status["new_reels"] = max(0, len(all_reels) - old_len)
+            _last_refresh["status"] = "done"
+            return jsonify(status)
+        except Exception as e:
+            return jsonify({"status": "unknown", "error": str(e)[:300]})
     return jsonify(_last_refresh)
 
 CRAWLBASE = "https://api.crawlbase.com/"
