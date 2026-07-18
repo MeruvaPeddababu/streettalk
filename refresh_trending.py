@@ -4,7 +4,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from playwright.sync_api import sync_playwright
 
 HERE = Path(__file__).parent
-MIN_LIKES = 500_000
+MIN_LIKES = 100_000
 MAX_REELS = 1500
 STATE_FILE = HERE / "instagram_state.json"
 
@@ -45,8 +45,7 @@ def parse_count(v):
     except:
         return 0
 
-def scroll_for_codes(page, all_seen, max_scrolls=10, wait_ms=1200):
-    """Keep scrolling until new codes stop appearing (or max_scrolls hit)."""
+def scroll_for_codes(page, all_seen, max_scrolls=40, wait_ms=800):
     found = set()
     stale_rounds = 0
     for _ in range(max_scrolls):
@@ -57,7 +56,7 @@ def scroll_for_codes(page, all_seen, max_scrolls=10, wait_ms=1200):
         new_codes = codes_in_page - all_seen - found
         if not new_codes:
             stale_rounds += 1
-            if stale_rounds >= 2:
+            if stale_rounds >= 4:
                 break
         else:
             stale_rounds = 0
@@ -92,11 +91,18 @@ def get_reel_data_from_embed(code):
     headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"}
     try:
         r = requests.get(url, headers=headers, timeout=15)
-        if r.status_code != 200 or len(r.text) < 100000:
+        if r.status_code != 200 or len(r.text) < 50000:
             return 0, None
         text = r.text
         likes_m = re.search(r'([\d,]+)\s*(?:likes?)', text, re.IGNORECASE)
         likes = int(likes_m.group(1).replace(",", "")) if likes_m else 0
+        if likes == 0:
+            try:
+                oembed = requests.get(f"https://api.instagram.com/oembed?url=https://www.instagram.com/p/{code}/", timeout=10)
+                if oembed.status_code == 200:
+                    likes = oembed.json().get("like_count", 0)
+            except:
+                pass
         unames = list(set(re.findall(r'instagram\.com/([A-Za-z0-9._]+)', text)))
         excluded = {'p', 'reel', 'reels', 'explore', 'stories', 'accounts', 'login', 'signup', 'embed', 'v', 'rsrc.php', 'jpg', 'png', 'fb', 'static', '_n'}
         username = next((u for u in unames if u not in excluded), None)
@@ -263,7 +269,7 @@ def login_and_capture_tokens():
                     print(f"    Followers: {stats['followers']:,}  Posts: {stats['posts']:,}")
                     codes_in_page = set(re.findall(r'/reel/([A-Za-z0-9_-]{11,})', html)) - all_seen
                     all_seen.update(codes_in_page)
-                    codes_in_page |= scroll_for_codes(page, all_seen, max_scrolls=12)
+                    codes_in_page |= scroll_for_codes(page, all_seen, max_scrolls=30)
                     all_seen.update(codes_in_page)
                     print(f"    Found {len(codes_in_page)} new reel codes")
                 except Exception as e:

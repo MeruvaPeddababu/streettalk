@@ -384,7 +384,6 @@ async function refreshAll() {
   // Poll for completion
   btn.textContent = "Scraping...";
   let attempts = 0;
-  const maxAttempts = 120;
   const poll = async () => {
     attempts++;
     try {
@@ -393,12 +392,7 @@ async function refreshAll() {
       if (s.status === "running" || s.status === "idle") {
         btn.textContent = "Scraping " + ".".repeat((attempts % 3) + 1);
         live.textContent = "⟳ Scraping " + ".".repeat((attempts % 3) + 1);
-        if (attempts < maxAttempts) {
-          setTimeout(poll, 2000);
-        } else {
-          showToast("Refresh timed out — data may be stale", "error");
-          finishRefresh();
-        }
+        setTimeout(poll, 2000);
       } else if (s.status === "done") {
         btn.textContent = `+${s.new_reels} new!`;
         live.textContent = "● Live";

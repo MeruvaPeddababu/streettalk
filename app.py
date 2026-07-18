@@ -91,7 +91,17 @@ def load_data():
                 "top_reels": []
             }
 
-    all_reels = reels
+    reels.sort(key=lambda r: r["likes"], reverse=True)
+    seen_usernames = {}
+    deduped = []
+    for r in reels:
+        u = r["username"]
+        if u not in seen_usernames:
+            seen_usernames[u] = 0
+        if seen_usernames[u] < 5:
+            seen_usernames[u] += 1
+            deduped.append(r)
+    all_reels = deduped
     profiles_cache = profiles
 
 load_data()
@@ -228,7 +238,7 @@ def _run_scrape():
     try:
         result = subprocess.run(
             [sys.executable, "refresh_trending.py"],
-            capture_output=True, text=True, timeout=600
+            capture_output=True, text=True
         )
         if result.returncode == 0:
             old_len = len(all_reels)
@@ -242,10 +252,6 @@ def _run_scrape():
             _last_refresh["status"] = "failed"
             _last_refresh["error"] = result.stderr[-500:] if result.stderr else "exit code non-zero"
             print(f"Refresh failed (code {result.returncode}): {result.stderr[:200]}")
-    except subprocess.TimeoutExpired:
-        _last_refresh["status"] = "failed"
-        _last_refresh["error"] = "timeout after 600s"
-        print("Refresh timeout")
     except Exception as e:
         _last_refresh["status"] = "failed"
         _last_refresh["error"] = str(e)[:500]
