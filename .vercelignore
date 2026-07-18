@@ -1,0 +1,7 @@
+.env
+venv
+__pycache__
+instagram.json
+instagram_state.json
+*.pyc
+.DS_Store

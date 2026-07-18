@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StreetTalk Live Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0f0f0f;color:#fff;display:flex;height:100vh}
+#sidebar{width:480px;min-width:480px;background:#1a1a1a;display:flex;flex-direction:column;border-right:1px solid #2a2a2a;height:100vh}
+#profile-panel{flex:1;overflow-y:auto;padding:16px 20px;display:none;flex-direction:column;min-height:0}
+#profile-panel.active{display:flex}
+#chat-section{flex-shrink:0;border-top:1px solid #2a2a2a;padding:12px 16px;background:#1a1a1a}
+.prof-header{display:flex;gap:16px;margin-bottom:20px;align-items:center}
+.prof-pic{width:72px;height:72px;border-radius:50%;object-fit:cover;background:#333}
+.prof-meta{flex:1}
+.prof-meta h2{font-size:18px;margin-bottom:4px}
+.prof-meta .bio{font-size:13px;color:#aaa;margin-bottom:6px}
+.prof-meta .stats{font-size:13px;color:#888}
+.prof-meta .stats span{color:#fff;font-weight:600}
+.reel-thumbs{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:20px}
+.reel-thumb{position:relative;aspect-ratio:9/16;border-radius:8px;overflow:hidden;cursor:pointer;background:#222}
+.reel-thumb img{width:100%;height:100%;object-fit:cover}
+.reel-thumb .likes{position:absolute;bottom:6px;left:6px;font-size:11px;background:rgba(0,0,0,.7);padding:2px 6px;border-radius:4px}
+.reel-thumb.selected{border:2px solid #0095f6}
+.chat-section{margin-top:auto;border-top:1px solid #2a2a2a;padding-top:16px}
+.chat-msgs{max-height:300px;overflow-y:auto;margin-bottom:12px;display:flex;flex-direction:column;gap:8px}
+.chat-msg{padding:10px 14px;border-radius:12px;font-size:14px;line-height:1.5}
+.chat-msg.user{background:#0095f6;align-self:flex-end;max-width:85%}
+.chat-msg.ai{background:#2a2a2a;align-self:flex-start;max-width:95%;white-space:pre-wrap}
+.chat-input{display:flex;gap:8px}
+.chat-input input{flex:1;padding:10px 14px;border-radius:20px;border:1px solid #333;background:#222;color:#fff;font-size:14px;outline:none}
+.chat-input input:focus{border-color:#0095f6}
+.chat-input button{padding:10px 18px;border-radius:20px;border:none;background:#0095f6;color:#fff;cursor:pointer;font-weight:600}
+.chat-input button:disabled{opacity:.5;cursor:not-allowed}
+#main{flex:1;display:flex;flex-direction:column;overflow:hidden}
+#main-header{padding:12px 24px;border-bottom:1px solid #2a2a2a;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}
+#main-header h1{font-size:20px}
+.header-controls{display:flex;align-items:center;gap:12px}
+.header-controls .count{color:#888;font-size:14px}
+#refresh-btn{padding:6px 14px;border-radius:6px;border:1px solid #333;background:#222;color:#fff;cursor:pointer;font-size:12px}
+#refresh-btn:hover{background:#333}
+#refresh-btn.loading{opacity:.5;pointer-events:none}
+#trends-section{overflow-y:auto;flex:1;padding:16px 24px}
+.stats-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:20px}
+.stat-card{background:#1a1a1a;border-radius:10px;padding:16px;border:1px solid #2a2a2a}
+.stat-card .label{font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+.stat-card .value{font-size:24px;font-weight:700}
+.stat-card .sub{font-size:12px;color:#666;margin-top:2px}
+.charts-row{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
+.chart-box{background:#1a1a1a;border-radius:10px;padding:16px;border:1px solid #2a2a2a}
+.chart-box.full{grid-column:1/-1}
+.chart-box h3{font-size:13px;color:#888;margin-bottom:12px;text-transform:uppercase;letter-spacing:.5px}
+.chart-box canvas{max-height:280px}
+#reel-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px}
+.reel-card{border-radius:12px;overflow:hidden;background:#1a1a1a;cursor:pointer;transition:transform .15s;border:2px solid transparent;display:flex;flex-direction:column}
+.reel-card:hover{transform:scale(1.02)}
+.reel-card.active{border-color:#0095f6}
+.reel-card .thumb{aspect-ratio:9/16;background:#222;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;max-height:380px}
+.reel-card .thumb img{width:100%;height:100%;object-fit:cover}
+.reel-card .thumb .play-overlay{position:absolute;font-size:40px;opacity:.7;text-shadow:0 2px 8px rgba(0,0,0,.5)}
+.reel-card .info{padding:12px 14px;flex:1;display:flex;flex-direction:column;gap:4px}
+.reel-card .info .top-row{display:flex;justify-content:space-between;align-items:center}
+.reel-card .info .username{font-size:14px;font-weight:600}
+.reel-card .info .likes{font-size:13px;color:#0095f6;font-weight:600}
+.reel-card .info .caption{font-size:12px;color:#888;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-top:2px}
+.reel-card .info .meta-row{display:flex;gap:12px;font-size:11px;color:#666;margin-top:4px;padding-top:6px;border-top:1px solid #2a2a2a}
+.loading{text-align:center;padding:40px;color:#666}
+.placeholder{display:flex;align-items:center;justify-content:center;height:100%;color:#555;font-size:18px;text-align:center;padding:40px}
+.section-title{font-size:14px;color:#888;margin-bottom:12px;text-transform:uppercase;letter-spacing:.5px}
+.trending-table{width:100%;border-collapse:collapse;font-size:13px}
+.trending-table th{padding:8px 10px;text-align:left;color:#888;border-bottom:1px solid #2a2a2a;font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.5px}
+.trending-table td{padding:8px 10px;border-bottom:1px solid #222}
+.trending-table tr:hover td{background:#1a1a1a}
+.trending-table .rank{color:#666;width:24px}
+.trending-table .uname{font-weight:600}
+.trending-table .likes-cell{color:#0095f6;font-weight:600}
+@media(max-width:900px){.charts-row{grid-template-columns:1fr}#sidebar{width:100%;min-width:unset;position:fixed;bottom:0;z-index:10;max-height:50vh;border-right:none;border-top:1px solid #2a2a2a}}
+</style>
+</head>
+<body>
+
+<div id="sidebar">
+  <div id="profile-panel">
+    <div class="prof-header">
+      <img class="prof-pic" id="prof-pic" src="" alt="">
+      <div class="prof-meta">
+        <h2 id="prof-username"></h2>
+        <div class="bio" id="prof-bio"></div>
+        <div class="stats" id="prof-stats"></div>
+      </div>
+    </div>
+    <div style="font-size:13px;color:#888;margin-bottom:8px">Top Reels</div>
+    <div class="reel-thumbs" id="reel-thumbs"></div>
+  </div>
+  <div class="placeholder" id="sidebar-placeholder">Select a reel or ask a question below</div>
+  <div class="chat-section" id="chat-section">
+    <div class="chat-msgs" id="chat-msgs"></div>
+    <div class="chat-input">
+      <input id="chat-input" placeholder="Ask about strategy, algorithm, trends..." />
+      <button id="chat-send">Send</button>
+    </div>
+  </div>
+</div>
+
+<div id="main">
+  <div id="main-header">
+    <h1>StreetTalk Live Trends</h1>
+    <div class="header-controls">
+      <span class="count" id="total-count">0 reels</span>
+      <span class="count" id="live-indicator" style="color:#00c853">● Live</span>
+      <button id="refresh-btn" onclick="refreshAll()">Refresh</button>
+    </div>
+  </div>
+
+  <div id="trends-section">
+    <div class="stats-row" id="stats-row"></div>
+
+    <div class="charts-row">
+      <div class="chart-box">
+        <h3>Top Creators by Total Likes</h3>
+        <canvas id="chart-top-creators"></canvas>
+      </div>
+      <div class="chart-box">
+        <h3>Likes Distribution</h3>
+        <canvas id="chart-distribution"></canvas>
+      </div>
+    </div>
+
+    <div class="charts-row">
+      <div class="chart-box full">
+        <h3>Monthly Trend</h3>
+        <canvas id="chart-monthly"></canvas>
+      </div>
+    </div>
+
+    <div class="charts-row" id="timeline-charts"></div>
+
+    <div class="section-title">Trending Reels</div>
+    <div id="reel-grid"></div>
+  </div>
+</div>
+
+<script>
+let reels = [];
+let currentUsername = null;
+let chartInstances = {};
+let refreshInterval = null;
+
+async function fetchJSON(url) {
+  const r = await fetch(url);
+  return r.json();
+}
+
+function formatNum(n) {
+  if (n >= 1e6) return (n/1e6).toFixed(1) + "M";
+  if (n >= 1e3) return (n/1e3).toFixed(1) + "K";
+  return n;
+}
+
+function parseLikes(s) {
+  if (!s) return 0;
+  if (typeof s === "number") return s;
+  s = String(s).replace(/,/g, "");
+  if (s.includes("M")) return parseFloat(s) * 1e6;
+  if (s.includes("K")) return parseFloat(s) * 1e3;
+  return parseInt(s) || 0;
+}
+
+async function loadStats() {
+  const d = await fetchJSON("/api/trends/overview");
+  document.getElementById("stats-row").innerHTML = `
+    <div class="stat-card"><div class="label">Total Reels</div><div class="value">${d.total_reels}</div><div class="sub">tracked</div></div>
+    <div class="stat-card"><div class="label">Total Likes</div><div class="value">${formatNum(d.total_likes)}</div><div class="sub">all time</div></div>
+    <div class="stat-card"><div class="label">Avg Likes</div><div class="value">${formatNum(d.avg_likes)}</div><div class="sub">per reel</div></div>
+    <div class="stat-card"><div class="label">Creators</div><div class="value">${d.unique_creators}</div><div class="sub">unique</div></div>
+    <div class="stat-card"><div class="label">Top Creator</div><div class="value" style="font-size:18px">@${d.top_creator}</div><div class="sub">${formatNum(d.top_creator_likes)} total likes</div></div>
+  `;
+}
+
+async function loadTopCreators() {
+  const data = await fetchJSON("/api/trends/top-creators");
+  const labels = data.slice(0, 10).map(c => "@" + c.username.substring(0, 12));
+  const values = data.slice(0, 10).map(c => c.total_likes);
+
+  if (chartInstances.topCreators) chartInstances.topCreators.destroy();
+  const ctx = document.getElementById("chart-top-creators").getContext("2d");
+  chartInstances.topCreators = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [{
+        label: "Total Likes",
+        data: values,
+        backgroundColor: "#0095f6",
+        borderRadius: 4
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        y: { beginAtZero: true, ticks: { callback: v => formatNum(v), color: "#666" }, grid: { color: "#2a2a2a" } },
+        x: { ticks: { color: "#888", maxRotation: 45 } }
+      }
+    }
+  });
+}
+
+async function loadMonthly() {
+  const data = await fetchJSON("/api/trends/monthly");
+  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const labels = data.map(d => months[d.month - 1] || "?");
+  const reelsData = data.map(d => d.reels);
+  const likesData = data.map(d => d.likes);
+
+  if (chartInstances.monthly) chartInstances.monthly.destroy();
+  const ctx = document.getElementById("chart-monthly").getContext("2d");
+  chartInstances.monthly = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels,
+      datasets: [
+        { label: "Likes", data: likesData, borderColor: "#0095f6", backgroundColor: "rgba(0,149,246,0.1)", fill: true, tension: .3, yAxisID: "y" },
+        { label: "Reels", data: reelsData, borderColor: "#00c853", backgroundColor: "rgba(0,200,83,0.1)", fill: true, tension: .3, yAxisID: "y1" }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: { legend: { labels: { color: "#888", boxWidth: 12, padding: 12 } } },
+      scales: {
+        y: { beginAtZero: true, position: "left", ticks: { callback: v => formatNum(v), color: "#666" }, grid: { color: "#2a2a2a" } },
+        y1: { beginAtZero: true, position: "right", ticks: { color: "#666" }, grid: { display: false } },
+        x: { ticks: { color: "#888" } }
+      }
+    }
+  });
+}
+
+async function loadDistribution() {
+  const data = await fetchJSON("/api/trends/top-creators");
+  const total = data.reduce((s, c) => s + c.total_likes, 0);
+  const top5 = data.slice(0, 5);
+  const others = total - top5.reduce((s, c) => s + c.total_likes, 0);
+  const labels = top5.map(c => "@" + c.username.substring(0, 10));
+  const values = top5.map(c => c.total_likes);
+  if (others > 0) { labels.push("Others"); values.push(others); }
+
+  if (chartInstances.distribution) chartInstances.distribution.destroy();
+  const ctx = document.getElementById("chart-distribution").getContext("2d");
+  const colors = ["#0095f6","#00c853","#ff6b35","#ffd700","#e040fb","#2a2a2a"];
+  chartInstances.distribution = new Chart(ctx, {
+    type: "doughnut",
+    data: {
+      labels,
+      datasets: [{ data: values, backgroundColor: colors.slice(0, labels.length), borderWidth: 0 }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: "right", labels: { color: "#888", boxWidth: 12, padding: 8, font: { size: 11 } } }
+      }
+    }
+  });
+}
+
+async function loadTimeline() {
+  const data = await fetchJSON("/api/trends/timeline");
+  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const container = document.getElementById("timeline-charts");
+  container.innerHTML = "";
+  const usernames = Object.keys(data);
+  if (!usernames.length) return;
+
+  usernames.forEach((u, i) => {
+    const box = document.createElement("div");
+    box.className = "chart-box";
+    const colors = ["#0095f6","#00c853","#ff6b35","#ffd700","#e040fb"];
+    box.innerHTML = `<h3>@${u}</h3><canvas id="tl-${i}" style="max-height:180px"></canvas>`;
+    container.appendChild(box);
+
+    const monthsData = data[u];
+    const labels = Object.keys(monthsData).map(m => months[parseInt(m) - 1]);
+    const likes = Object.values(monthsData).map(v => v.likes);
+    const reels = Object.values(monthsData).map(v => v.reels);
+
+    const ctx = document.getElementById(`tl-${i}`).getContext("2d");
+    new Chart(ctx, {
+      type: "bar",
+      data: {
+        labels,
+        datasets: [
+          { label: "Likes", data: likes, backgroundColor: colors[i % colors.length], borderRadius: 3, yAxisID: "y" },
+          { label: "Reels", data: reels, backgroundColor: "rgba(255,255,255,0.15)", borderRadius: 3, yAxisID: "y1" }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: "#888", boxWidth: 10, font: { size: 10 } } } },
+        scales: {
+          y: { beginAtZero: true, ticks: { callback: v => formatNum(v), color: "#555", font: { size: 9 } }, grid: { color: "#2a2a2a" } },
+          y1: { beginAtZero: true, position: "right", ticks: { color: "#555", font: { size: 9 } }, grid: { display: false } },
+          x: { ticks: { color: "#666", font: { size: 9 } } }
+        }
+      }
+    });
+  });
+}
+
+async function loadTrendingReels() {
+  const data = await fetchJSON("/api/trending");
+  const grid = document.getElementById("reel-grid");
+  reels = data.results.filter(r => r.caption || r.username);
+  document.getElementById("total-count").textContent = `${reels.length} trending`;
+
+  grid.innerHTML = reels.map((r, idx) => {
+    const uname = r.username || "unknown";
+    const likes = parseLikes(r.likes);
+    const comments = r.comments ? parseLikes(r.comments) : 0;
+    const caption = (r.caption || "").substring(0, 120);
+    return `
+      <div class="reel-card" data-username="${uname}" data-code="${r.reel_id}" onclick="selectReel('${uname}')">
+        <div class="thumb">
+          <img src="/api/thumb/${r.reel_id}" alt="" loading="lazy" onerror="this.parentElement.innerHTML='<span class=play-overlay>▶</span>'">
+          <span class="play-overlay">▶</span>
+        </div>
+        <div class="info">
+          <div class="top-row">
+            <span class="username">@${uname}</span>
+            <span class="likes">❤ ${formatNum(likes)}</span>
+          </div>
+          ${caption ? `<div class="caption">${escapeHtml(caption)}</div>` : ''}
+          <div class="meta-row">
+            ${comments ? `<span>💬 ${formatNum(comments)}</span>` : ''}
+            <span>#${idx + 1} trending</span>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+function escapeHtml(s) {
+  const d = document.createElement("div");
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function showToast(msg, type) {
+  const existing = document.getElementById("toast");
+  if (existing) existing.remove();
+  const t = document.createElement("div");
+  t.id = "toast";
+  t.style.cssText = `position:fixed;bottom:20px;right:20px;padding:12px 20px;border-radius:8px;font-size:14px;z-index:999;transition:opacity .3s;background:${type === 'error' ? '#d32f2f' : '#1a1a1a'};border:1px solid ${type === 'error' ? '#d32f2f' : '#333'};color:#fff;max-width:400px;box-shadow:0 4px 20px rgba(0,0,0,.5)`;
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 300); }, 5000);
+}
+
+async function refreshAll() {
+  const btn = document.getElementById("refresh-btn");
+  const live = document.getElementById("live-indicator");
+  btn.classList.add("loading");
+  btn.textContent = "Starting...";
+  live.textContent = "⟳ Scraping...";
+  live.style.color = "#ffd700";
+  try {
+    const r = await fetch("/api/refresh");
+    const d = await r.json();
+  } catch (e) {
+    showToast("Failed to start refresh", "error");
+    btn.classList.remove("loading");
+    btn.textContent = "Refresh";
+    live.textContent = "● Live";
+    live.style.color = "#00c853";
+    return;
+  }
+  // Poll for completion
+  btn.textContent = "Scraping...";
+  let attempts = 0;
+  const maxAttempts = 120;
+  const poll = async () => {
+    attempts++;
+    try {
+      const r = await fetch("/api/refresh/status");
+      const s = await r.json();
+      if (s.status === "running" || s.status === "idle") {
+        btn.textContent = "Scraping " + ".".repeat((attempts % 3) + 1);
+        live.textContent = "⟳ Scraping " + ".".repeat((attempts % 3) + 1);
+        if (attempts < maxAttempts) {
+          setTimeout(poll, 2000);
+        } else {
+          showToast("Refresh timed out — data may be stale", "error");
+          finishRefresh();
+        }
+      } else if (s.status === "done") {
+        btn.textContent = `+${s.new_reels} new!`;
+        live.textContent = "● Live";
+        live.style.color = "#00c853";
+        showToast(`Refresh complete: ${s.new_reels} new reels added (${s.total_reels} total)`);
+        await reloadUI();
+        finishRefresh();
+      } else if (s.status === "failed") {
+        showToast(`Refresh failed: ${s.error || "unknown error"}`, "error");
+        live.textContent = "● Live";
+        live.style.color = "#00c853";
+        await reloadUI();
+        finishRefresh();
+      }
+    } catch (e) {
+      if (attempts < maxAttempts) {
+        setTimeout(poll, 2000);
+      } else {
+        showToast("Status check failed", "error");
+        finishRefresh();
+      }
+    }
+  };
+  function finishRefresh() {
+    btn.classList.remove("loading");
+    btn.textContent = "Refresh";
+    live.textContent = "● Live";
+    live.style.color = "#00c853";
+  }
+  setTimeout(poll, 2000);
+}
+
+async function reloadUI() {
+  await Promise.all([
+    loadStats(),
+    loadTopCreators(),
+    loadMonthly(),
+    loadDistribution(),
+    loadTimeline(),
+    loadTrendingReels()
+  ]);
+}
+
+async function selectReel(username) {
+  if (!username) return;
+  currentUsername = username;
+  document.querySelectorAll(".reel-card").forEach(c => c.classList.toggle("active", c.dataset.username === username));
+  document.getElementById("sidebar-placeholder").style.display = "none";
+  const panel = document.getElementById("profile-panel");
+  panel.classList.add("active");
+  panel.innerHTML = `<div class="loading">Loading profile...</div>`;
+
+  const res = await fetch(`/api/profile/${encodeURIComponent(username)}`);
+  document.getElementById("chat-input").placeholder = `Ask about @${username}...`;
+  if (!res.ok) {
+    panel.innerHTML = `<div class="prof-header"><div class="prof-meta"><h2>@${username}</h2><div class="bio">No profile data yet</div></div></div>`;
+    return;
+  }
+  const prof = await res.json();
+  renderProfile(prof);
+  setTimeout(() => sendChatMsg(`Analyze @${username}'s top reels and give me overall strategy with detailed breakdown`), 300);
+}
+
+function renderProfile(prof) {
+  const panel = document.getElementById("profile-panel");
+  const reelsHtml = (prof.top_reels || []).map(r => `
+    <div class="reel-thumb">
+      <img src="/api/thumb/${r.reel_id}" alt="" loading="lazy" onerror="this.parentElement.innerHTML='<span style=font-size:24px>▶</span>'">
+      <div class="likes">${formatNum(r.likes)}</div>
+    </div>
+  `).join("");
+
+  panel.innerHTML = `
+    <div class="prof-header">
+      <img class="prof-pic" src="${prof.profile_pic || ''}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><circle cx=%2250%22 cy=%2250%22 r=%2250%22 fill=%22%23333%22/></svg>'">
+      <div class="prof-meta">
+        <h2>@${prof.username}</h2>
+        <div class="bio">${prof.bio || 'No bio'}</div>
+        <div class="stats"><span>${formatNum(prof.followers)}</span> followers · <span>${prof.posts}</span> posts</div>
+      </div>
+      <button onclick="showAddReelInput()" style="align-self:start;padding:6px 12px;border-radius:6px;border:1px solid #333;background:#222;color:#fff;cursor:pointer;font-size:11px;white-space:nowrap">+ Add Reel</button>
+    </div>
+    <div id="add-reel-area" style="display:none;margin-bottom:12px">
+      <div style="display:flex;gap:6px">
+        <input id="add-reel-input" placeholder="Paste Instagram reel URL..." style="flex:1;padding:8px 12px;border-radius:6px;border:1px solid #333;background:#222;color:#fff;font-size:13px;outline:none">
+        <button onclick="addReel()" style="padding:8px 14px;border-radius:6px;border:none;background:#0095f6;color:#fff;cursor:pointer;font-weight:600;font-size:12px">Add</button>
+      </div>
+      <div id="add-reel-status" style="font-size:12px;color:#888;margin-top:4px"></div>
+    </div>
+    <div style="font-size:13px;color:#888;margin-bottom:8px">Top Reels</div>
+    <div class="reel-thumbs">${reelsHtml}</div>
+  `;
+  document.getElementById("chat-input").placeholder = `Ask about @${prof.username}'s strategy...`;
+}
+
+function setupChat() {
+  const input = document.getElementById("chat-input");
+  const btn = document.getElementById("chat-send");
+  const msgs = document.getElementById("chat-msgs");
+  if (!input || !btn || !msgs) return;
+  window.sendChatMsg = (msg) => {
+    if (!msg) return;
+    addChatMsg("user", msg);
+    input.value = "";
+    btn.disabled = true;
+    addChatMsg("ai", "Analyzing...");
+    fetch("/api/chat", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({username: currentUsername || "", message: msg})
+    }).then(r => r.json()).then(d => {
+      msgs.removeChild(msgs.lastChild);
+      addChatMsg("ai", d.reply);
+      btn.disabled = false;
+    }).catch(() => {
+      msgs.removeChild(msgs.lastChild);
+      addChatMsg("ai", "Error getting response.");
+      btn.disabled = false;
+    });
+  };
+  btn.onclick = () => window.sendChatMsg(input.value.trim());
+  input.onkeydown = e => { if (e.key === "Enter") window.sendChatMsg(input.value.trim()); };
+}
+
+window.showAddReelInput = function() {
+  const area = document.getElementById("add-reel-area");
+  if (area) {
+    area.style.display = area.style.display === "none" ? "block" : "none";
+    if (area.style.display === "block") {
+      setTimeout(() => document.getElementById("add-reel-input")?.focus(), 100);
+    }
+  }
+};
+
+window.addReel = async function() {
+  const input = document.getElementById("add-reel-input");
+  const status = document.getElementById("add-reel-status");
+  const url = input?.value?.trim();
+  if (!url) { status.textContent = "Enter a reel URL"; return; }
+  status.textContent = "Adding...";
+  try {
+    const r = await fetch("/api/reels/add", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({url})
+    });
+    const d = await r.json();
+    if (d.ok) {
+      status.textContent = d.status === "already exists" ? "Already in list" : "Added!";
+      input.value = "";
+      const uname = currentUsername;
+      const res = await fetch(`/api/profile/${encodeURIComponent(uname)}`);
+      if (res.ok) renderProfile(await res.json());
+      await loadTrendingReels();
+      await loadStats();
+      document.getElementById("total-count").textContent = `${reels.length} trending`;
+    } else {
+      status.textContent = "Error: " + (d.error || "unknown");
+    }
+  } catch (e) {
+    status.textContent = "Network error";
+  }
+  setTimeout(() => { if (status) status.textContent = ""; }, 4000);
+};
+
+setupChat();
+
+function addChatMsg(role, text) {
+  const el = document.createElement("div");
+  el.className = `chat-msg ${role}`;
+  el.textContent = text;
+  document.getElementById("chat-msgs").appendChild(el);
+  el.scrollIntoView({behavior:"smooth"});
+}
+
+reloadUI();
+
+refreshInterval = setInterval(reloadUI, 60000);
+</script>
+</body>
+</html>
