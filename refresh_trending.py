@@ -35,6 +35,58 @@ HASHTAGS = [
 
 SESSION_TOKENS = {}
 
+def parse_count(v):
+    if not v: return 0
+    v = str(v).replace(",", "").strip()
+    try:
+        if v.endswith("M"): return int(float(v[:-1]) * 1_000_000)
+        if v.endswith("K"): return int(float(v[:-1]) * 1_000)
+        return int(float(v))
+    except:
+        return 0
+
+def scroll_for_codes(page, all_seen, max_scrolls=10, wait_ms=1200):
+    """Keep scrolling until new codes stop appearing (or max_scrolls hit)."""
+    found = set()
+    stale_rounds = 0
+    for _ in range(max_scrolls):
+        page.evaluate("window.scrollBy(0, document.body.scrollHeight)")
+        page.wait_for_timeout(wait_ms)
+        html = page.content()
+        codes_in_page = set(re.findall(r'/reel/([A-Za-z0-9_-]{11,})', html))
+        new_codes = codes_in_page - all_seen - found
+        if not new_codes:
+            stale_rounds += 1
+            if stale_rounds >= 2:
+                break
+        else:
+            stale_rounds = 0
+            found.update(new_codes)
+        if len(all_seen) + len(found) >= MAX_REELS:
+            break
+    return found
+
+def extract_profile_stats(html):
+    stats = {"followers": 0, "following": 0, "posts": 0, "bio": "", "profile_pic": ""}
+    m = re.search(r'<meta property="og:description" content="([^"]*)"', html)
+    if m:
+        desc = m.group(1)
+        sm = re.search(r'([\d.,]+[KM]?)\s*Followers,\s*([\d.,]+[KM]?)\s*Following,\s*([\d.,]+[KM]?)\s*Posts', desc, re.IGNORECASE)
+        if sm:
+            stats["followers"] = parse_count(sm.group(1))
+            stats["following"] = parse_count(sm.group(2))
+            stats["posts"] = parse_count(sm.group(3))
+    bm = re.search(r'"biography":"((?:[^"\\]|\\.)*)"', html)
+    if bm:
+        try:
+            stats["bio"] = json.loads(f'"{bm.group(1)}"')
+        except:
+            pass
+    pm = re.search(r'<meta property="og:image" content="([^"]*)"', html)
+    if pm:
+        stats["profile_pic"] = pm.group(1)
+    return stats
+
 def get_reel_data_from_embed(code):
     url = f"https://www.instagram.com/p/{code}/embed/"
     headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"}
@@ -143,14 +195,14 @@ def login_and_capture_tokens():
             page.goto(f"https://www.instagram.com/explore/search/keyword/?q={urllib.parse.quote(ht)}",
                 wait_until="domcontentloaded", timeout=20000)
             page.wait_for_timeout(2000)
-            for s in range(2):
-                page.evaluate("window.scrollBy(0, document.body.scrollHeight)")
-                page.wait_for_timeout(1000)
 
-            # Extract reel codes from page HTML (links even without full render)
+            # Extract reel codes from initial + scrolled page HTML (scrolls deeper each
+            # run until new codes stop appearing, so repeat refreshes surface reels
+            # beyond whatever the first couple screens already gave us)
             html = page.content()
-            codes_in_page = set(re.findall(r'/reel/([A-Za-z0-9_-]{11,})', html))
-            new_codes = codes_in_page - all_seen
+            new_codes = set(re.findall(r'/reel/([A-Za-z0-9_-]{11,})', html)) - all_seen
+            all_seen.update(new_codes)
+            new_codes |= scroll_for_codes(page, all_seen)
             all_seen.update(new_codes)
             print(f"  Found {len(new_codes)} new codes (total: {len(all_seen)})")
 
@@ -188,6 +240,7 @@ def login_and_capture_tokens():
                 all_seen.add(code)
 
         # Scrape profile pages of top creators from previous results
+        scraped_profiles = {}
         top_creators = list(dict.fromkeys(r["username"] for r in previous_results if r.get("username")))[:5]
         if top_creators:
             print(f"\nScraping profiles of {len(top_creators)} top creators...")
@@ -199,24 +252,30 @@ def login_and_capture_tokens():
                     page.goto(f"https://www.instagram.com/{username}/",
                         wait_until="domcontentloaded", timeout=20000)
                     page.wait_for_timeout(4000)
-                    for s in range(5):
-                        page.evaluate("window.scrollBy(0, document.body.scrollHeight)")
-                        page.wait_for_timeout(1500)
                     html = page.content()
-                    codes_in_page = set(re.findall(r'/reel/([A-Za-z0-9_-]{11,})', html))
-                    new_codes = codes_in_page - all_seen
-                    all_seen.update(new_codes)
-                    print(f"    Found {len(new_codes)} new reel codes")
+                    stats = extract_profile_stats(html)
+                    scraped_profiles[username] = {
+                        "username": username,
+                        "profile_url": f"https://www.instagram.com/{username}/",
+                        **stats,
+                        "top_reels": [],
+                    }
+                    print(f"    Followers: {stats['followers']:,}  Posts: {stats['posts']:,}")
+                    codes_in_page = set(re.findall(r'/reel/([A-Za-z0-9_-]{11,})', html)) - all_seen
+                    all_seen.update(codes_in_page)
+                    codes_in_page |= scroll_for_codes(page, all_seen, max_scrolls=12)
+                    all_seen.update(codes_in_page)
+                    print(f"    Found {len(codes_in_page)} new reel codes")
                 except Exception as e:
                     print(f"    Error: {e}")
 
         print(f"\nTotal unique codes collected: {len(all_seen)}")
         browser.close()
-    return list(all_seen)[:MAX_REELS]
+    return list(all_seen)[:MAX_REELS], scraped_profiles
 
 print("=== REFRESH TRENDING REELS ===")
 
-codes = login_and_capture_tokens()
+codes, scraped_profiles = login_and_capture_tokens()
 
 print(f"\nChecking {len(codes)} codes via embed...")
 
@@ -266,20 +325,34 @@ for r in results:
 merged = sorted(existing_results, key=lambda x: x["likes"], reverse=True)
 merged = merged[:MAX_REELS]
 
+# Preserve previously-scraped profile stats instead of wiping them every run
+existing_profiles = {}
+profile_path = HERE / "profile_info.json"
+if profile_path.exists():
+    try:
+        existing_profiles = json.loads(profile_path.read_text())
+    except:
+        pass
+
 profiles = {}
 for r in merged:
     u = r["username"]
     if u and u not in profiles:
-        profiles[u] = {
-            "username": u,
-            "profile_url": r.get("profile_url", f"https://www.instagram.com/{u}/"),
-            "profile_pic": "",
-            "bio": "",
-            "followers": 0,
-            "following": 0,
-            "posts": 0,
-            "top_reels": []
-        }
+        if u in scraped_profiles:
+            profiles[u] = scraped_profiles[u]
+        elif u in existing_profiles:
+            profiles[u] = existing_profiles[u]
+        else:
+            profiles[u] = {
+                "username": u,
+                "profile_url": r.get("profile_url", f"https://www.instagram.com/{u}/"),
+                "profile_pic": "",
+                "bio": "",
+                "followers": 0,
+                "following": 0,
+                "posts": 0,
+                "top_reels": []
+            }
 
 with open(HERE / "reels_playwright_output.json", "w") as f:
     json.dump({"total_reels": len(merged), "min_likes": MIN_LIKES, "results": merged}, f, indent=2)
