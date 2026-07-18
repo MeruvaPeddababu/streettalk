@@ -343,13 +343,18 @@ def api_refresh_status():
                     return jsonify({"status": "running"})
             old_len = len(all_reels)
             load_data()
+            new_reels = max(0, len(all_reels) - old_len) if old_len > 0 else 0
             status["total_reels"] = len(all_reels)
-            status["new_reels"] = max(0, len(all_reels) - old_len)
-            _last_refresh["status"] = "done"
+            status["new_reels"] = new_reels
+            if started_at:
+                _last_refresh["status"] = "done"
             return jsonify(status)
         except Exception as e:
             return jsonify({"status": "unknown", "error": str(e)[:300]})
-    return jsonify(_last_refresh)
+    s = _last_refresh.copy()
+    s["new_reels"] = max(0, s.get("new_reels", 0))
+    s["total_reels"] = max(0, s.get("total_reels", 0))
+    return jsonify(s)
 
 CRAWLBASE = "https://api.crawlbase.com/"
 CRAWLBASE_TOKEN = os.environ.get("CRAWLBASE_API_TOKEN", "")

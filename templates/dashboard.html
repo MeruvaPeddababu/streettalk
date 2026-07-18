@@ -370,9 +370,10 @@ async function refreshAll() {
   btn.textContent = "Starting...";
   live.textContent = "⟳ Scraping...";
   live.style.color = "#ffd700";
+  let r, d;
   try {
-    const r = await fetch("/api/refresh");
-    const d = await r.json();
+    r = await fetch("/api/refresh");
+    d = await r.json();
   } catch (e) {
     showToast("Failed to start refresh", "error");
     btn.classList.remove("loading");
@@ -381,15 +382,44 @@ async function refreshAll() {
     live.style.color = "#00c853";
     return;
   }
-  // Poll for completion
+  if (!r.ok || d.status === "failed") {
+    showToast("Refresh start failed" + (d.error ? ": " + d.error : ""), "error");
+    btn.classList.remove("loading");
+    btn.textContent = "Refresh";
+    live.textContent = "● Live";
+    live.style.color = "#00c853";
+    return;
+  }
+  if (d.status === "already running") {
+    showToast("Refresh already in progress", "info");
+    btn.classList.remove("loading");
+    btn.textContent = "Refresh";
+    live.textContent = "● Live";
+    live.style.color = "#00c853";
+    return;
+  }
+  if (d.via === "github_actions") {
+    showToast("Refresh scheduled via GitHub Actions — new reels appear within 5 min");
+    btn.classList.remove("loading");
+    btn.textContent = "Refresh";
+    live.textContent = "● Live";
+    live.style.color = "#00c853";
+    return;
+  }
+  // Poll for completion (local mode only)
   btn.textContent = "Scraping...";
-  let attempts = 0;
+  let attempts = 0, maxAttempts = 180;
   const poll = async () => {
     attempts++;
     try {
       const r = await fetch("/api/refresh/status");
       const s = await r.json();
       if (s.status === "running" || s.status === "idle") {
+        if (attempts >= maxAttempts) {
+          showToast("Refresh timed out", "error");
+          finishRefresh();
+          return;
+        }
         btn.textContent = "Scraping " + ".".repeat((attempts % 3) + 1);
         live.textContent = "⟳ Scraping " + ".".repeat((attempts % 3) + 1);
         setTimeout(poll, 2000);
@@ -406,10 +436,17 @@ async function refreshAll() {
         live.style.color = "#00c853";
         await reloadUI();
         finishRefresh();
+      } else {
+        if (attempts >= maxAttempts) {
+          showToast("Refresh timed out", "error");
+          finishRefresh();
+          return;
+        }
+        setTimeout(poll, 2000);
       }
     } catch (e) {
       if (attempts < maxAttempts) {
-        setTimeout(poll, 2000);
+        setTimeout(poll, 4000);
       } else {
         showToast("Status check failed", "error");
         finishRefresh();
