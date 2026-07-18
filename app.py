@@ -346,7 +346,7 @@ def api_refresh_status():
     return jsonify(_last_refresh)
 
 CRAWLBASE = "https://api.crawlbase.com/"
-CRAWLBASE_TOKEN = "nKg4PEPDb9uENnPuL5C5DQ"
+CRAWLBASE_TOKEN = os.environ.get("CRAWLBASE_API_TOKEN", "")
 _trending_cache = {"data": "", "ts": 0}
 
 def get_trending_context():
